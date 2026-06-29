@@ -160,8 +160,12 @@ export default function MobileApp({
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [customDescription, setCustomDescription] = useState("");
   const [showManualButton, setShowManualButton] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const analysisBypassedRef = useRef(false);
 
   const triggerManualFallback = () => {
+    analysisBypassedRef.current = true;
+    setAiError(null);
     const fallbackResult = {
       category: "Other",
       severity: "Medium" as SeverityLevel,
@@ -410,8 +414,10 @@ export default function MobileApp({
   // Run Gemini analysis and priority calculation via API route
   const analyzeAndSubmitReport = async () => {
     if (!selectedImage) return;
+    analysisBypassedRef.current = false;
     setReportingStep("analyzing");
     setAnalysisResult(null);
+    setAiError(null);
     setShowManualButton(false);
 
     console.log("%c=== [CIVICEYE] GEMINI VISION PIPELINE INVOKED ===", "color: #3b82f6; font-weight: bold; font-size: 13px;");
@@ -431,12 +437,24 @@ export default function MobileApp({
         })
       });
 
+      if (analysisBypassedRef.current) {
+        clearTimeout(manualBtnTimer);
+        console.log("[CIVICEYE] Ignoring Gemini response because user bypassed via manual addition.");
+        return;
+      }
+
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || "Gemini service failed");
       }
 
       const result = await response.json();
+      
+      if (analysisBypassedRef.current) {
+        clearTimeout(manualBtnTimer);
+        console.log("[CIVICEYE] Ignoring Gemini response because user bypassed via manual addition.");
+        return;
+      }
       
       console.log("%c=== [CIVICEYE] GEMINI VISION RESPONSE RECEIVED ===", "color: #10b981; font-weight: bold; font-size: 13px;");
       console.log("%c[2/4] Raw response string returned from Gemini:", "color: #f59e0b; font-weight: bold;");
@@ -475,11 +493,14 @@ export default function MobileApp({
       setReportingStep("review");
     } catch (error: any) {
       clearTimeout(manualBtnTimer);
+      if (analysisBypassedRef.current) {
+        console.log("[CIVICEYE] Ignoring Gemini failure because user bypassed via manual addition.");
+        return;
+      }
       console.error("%c=== [CIVICEYE] GEMINI VISION PIPELINE FAILURE ===", "color: #ef4444; font-weight: bold; font-size: 13px;");
       console.error(`[Error Details]: ${error.message || String(error)}`);
-      console.warn("[Fallback Triggered]: Opening manual report editor default form.");
-
-      triggerManualFallback();
+      
+      setAiError("The AI is currently not responding. Please use the manual method to raise this issue.");
     }
   };
 
@@ -506,7 +527,7 @@ export default function MobileApp({
         severity: finalSeverity,
         description: finalDescription,
         citizenNotes: finalCitizenNotes,
-        department: analysisResult?.department || getDepartmentForCategory(finalCategory),
+        department: getDepartmentForCategory(finalCategory),
         priorityScore: analysisResult?.priorityScore || 50,
         confidence: analysisResult?.confidence || 75,
         imageUrl: selectedImage,
@@ -1060,29 +1081,55 @@ export default function MobileApp({
                   {/* STEP 3: ANALYZING */}
                   {reportingStep === "analyzing" && (
                     <div className="py-12 px-6 text-center space-y-4 bg-white border border-slate-100 rounded-2xl">
-                      <div className="relative w-16 h-16 mx-auto">
-                        <div className="absolute inset-0 rounded-full border-4 border-slate-100 border-t-emerald-500 animate-spin"></div>
-                        <div className="absolute inset-2 bg-emerald-50 rounded-full flex items-center justify-center">
-                          <Sparkles className="w-6 h-6 text-emerald-500" />
+                      {!aiError ? (
+                        <>
+                          <div className="relative w-16 h-16 mx-auto">
+                            <div className="absolute inset-0 rounded-full border-4 border-slate-100 border-t-emerald-500 animate-spin"></div>
+                            <div className="absolute inset-2 bg-emerald-50 rounded-full flex items-center justify-center">
+                              <Sparkles className="w-6 h-6 text-emerald-500" />
+                            </div>
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-800">Consulting Gemini Vision</h4>
+                            <p className="text-[10px] text-slate-400 mt-1 max-w-[250px] mx-auto">
+                              Analyzing structural hazard, computing priority score based on safety threat indicators, and mapping issue.
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="space-y-3 p-4 bg-rose-50 border border-rose-200 rounded-xl">
+                          <AlertTriangle className="w-8 h-8 text-rose-600 mx-auto animate-bounce" />
+                          <h4 className="text-xs font-extrabold text-rose-950">AI Analyzer Unresponsive</h4>
+                          <p className="text-[11px] text-rose-800 leading-normal font-medium max-w-[240px] mx-auto">
+                            {aiError}
+                          </p>
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={triggerManualFallback}
+                              className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <span>Use Manual Method</span>
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-800">Consulting Gemini Vision</h4>
-                        <p className="text-[10px] text-slate-400 mt-1 max-w-[250px] mx-auto">
-                          Analyzing structural hazard, computing priority score based on safety threat indicators, and mapping issue.
-                        </p>
-                      </div>
+                      )}
 
-                      {showManualButton && (
+                      {/* Add Manually button if not in error state */}
+                      {!aiError && (
                         <div className="pt-4 border-t border-slate-100 mt-4 flex flex-col items-center gap-2">
-                          <p className="text-[10px] text-amber-600 font-semibold">AI analysis is taking longer than expected...</p>
+                          {showManualButton && (
+                            <p className="text-[10px] text-amber-650 font-semibold bg-amber-50 px-2 py-1 rounded-lg border border-amber-100 animate-pulse">
+                              AI analysis is taking longer than expected...
+                            </p>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
-                              console.log("[CIVICEYE] User requested manual addition after timeout.");
+                              console.log("[CIVICEYE] User requested manual addition.");
                               triggerManualFallback();
                             }}
-                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-[11px] rounded-xl shadow-md shadow-emerald-500/10 cursor-pointer transition-all flex items-center gap-1.5"
+                            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] rounded-xl shadow-md cursor-pointer transition-all flex items-center gap-1.5"
                           >
                             <span>Add Manually</span>
                           </button>
@@ -1156,7 +1203,7 @@ export default function MobileApp({
                             </div>
                             <div>
                               <p className="text-[8px] font-bold text-slate-400 uppercase">Department</p>
-                              <p className="text-[10px] font-extrabold text-indigo-700 truncate">{analysisResult?.department || "Sanitation"}</p>
+                              <p className="text-[10px] font-extrabold text-indigo-700 truncate">{getDepartmentForCategory(reviewCategory || "Other")}</p>
                             </div>
                             <div>
                               <p className="text-[8px] font-bold text-slate-400 uppercase">Confidence</p>
@@ -1247,7 +1294,7 @@ export default function MobileApp({
                             </div>
                             <div>
                               <p className="text-[7px] font-bold text-slate-400 uppercase">Department</p>
-                              <p className="text-[9px] font-extrabold text-slate-600 truncate">{analysisResult?.department || "Sanitation"}</p>
+                              <p className="text-[9px] font-extrabold text-slate-600 truncate">{getDepartmentForCategory(reviewCategory || "Other")}</p>
                             </div>
                             <div>
                               <p className="text-[7px] font-bold text-slate-400 uppercase">Confidence</p>

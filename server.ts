@@ -15,11 +15,38 @@ app.use(express.json({ limit: "10mb" }));
 // User provided custom API key to fall back on if primary environment key is absent or exhausted
 const USER_PROVIDED_API_KEY = "AQ.Ab8RN6LQYgZm9I9OrC1HdaBMU02fpNTg1zkhCLCt5F9fo8WLnQ";
 
-function getGeminiClient(customKey?: string) {
-  const key = customKey || process.env.GEMINI_API_KEY || USER_PROVIDED_API_KEY;
-  if (!key) {
-    throw new Error("GEMINI_API_KEY is required but could not be resolved");
+function isValidGeminiKey(key: string | undefined): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  if (
+    trimmed === "MY_GEMINI_API_KEY" || 
+    trimmed === "" || 
+    trimmed.startsWith("YOUR_") || 
+    trimmed.includes("placeholder") ||
+    trimmed.length < 10
+  ) {
+    return false;
   }
+  return true;
+}
+
+function getGeminiClient(customKey?: string) {
+  const envKey = process.env.GEMINI_API_KEY;
+  const fallbackKey = USER_PROVIDED_API_KEY;
+  
+  let key = "";
+  if (customKey && isValidGeminiKey(customKey)) {
+    key = customKey;
+  } else if (envKey && isValidGeminiKey(envKey)) {
+    key = envKey;
+  } else if (fallbackKey && isValidGeminiKey(fallbackKey)) {
+    key = fallbackKey;
+  }
+
+  if (!key) {
+    throw new Error("No valid Gemini API key is configured. Please ensure a valid API key is set.");
+  }
+
   return new GoogleGenAI({
     apiKey: key,
     httpOptions: {
@@ -155,7 +182,12 @@ app.post("/api/gemini-analyze", async (req, res) => {
     const primaryKey = process.env.GEMINI_API_KEY;
     const fallbackKey = USER_PROVIDED_API_KEY;
     
-    let activeKey = primaryKey || fallbackKey;
+    let activeKey = isValidGeminiKey(primaryKey) ? primaryKey : (isValidGeminiKey(fallbackKey) ? fallbackKey : undefined);
+    
+    if (!activeKey) {
+      throw new Error("No valid Gemini API key is configured. Please configure your key in Settings > Secrets.");
+    }
+    
     let ai = getGeminiClient(activeKey);
 
     const prompt = `You are an expert urban infrastructure inspection AI.
@@ -291,26 +323,13 @@ Do not include any Markdown wrap like \`\`\`json. Just the clean JSON string.`;
 
     return res.json(data);
   } catch (error: any) {
-    console.error("[CIVICEYE SERVER] Gemini analysis failed. Triggering Smart Local Heuristics Fallback Model...");
+    console.error("[CIVICEYE SERVER] Gemini analysis failed. Returning error status to client...");
     console.error(`Reason: ${error.message || String(error)}`);
     
-    try {
-      const fallbackData = getLocalAnalysis(cleanBase64);
-      const enrichedFallback = {
-        ...fallbackData,
-        _isFallback: true,
-        _fallbackReason: `Gemini API quota exceeded or offline: ${error.message || "Quota limit reached"}. Activated CivicEye high-fidelity local inspection heuristics.`,
-        _rawText: JSON.stringify(fallbackData)
-      };
-      
-      console.log("[CIVICEYE SERVER] Successfully completed Smart Local Classification:", enrichedFallback.category);
-      return res.json(enrichedFallback);
-    } catch (fallbackErr) {
-      return res.status(500).json({
-        error: "Failed to analyze image with Gemini AI or Local Fallback Model",
-        details: error.message || String(error)
-      });
-    }
+    return res.status(503).json({
+      error: "The AI is currently not responding. Please use the manual method to raise this issue.",
+      details: error.message || String(error)
+    });
   }
 });
 
