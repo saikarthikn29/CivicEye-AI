@@ -1,0 +1,6 @@
+{
+  "name": "CivicEye AI",
+  "description": "An AI-powered urban infrastructure reporting applet. Report potholes, garbage, water leaks, and other issues. Automatically analyzed and prioritized by Gemini AI and mapped with Google Maps.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
