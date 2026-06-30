@@ -158,6 +158,7 @@ export default function MobileApp({
 
   // Gemini result state
   const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [submittedIssue, setSubmittedIssue] = useState<Issue | null>(null);
   const [customDescription, setCustomDescription] = useState("");
   const [showManualButton, setShowManualButton] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -445,7 +446,7 @@ export default function MobileApp({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Gemini service failed");
+        throw new Error(errorData.error || "AI service failed");
       }
 
       const result = await response.json();
@@ -515,6 +516,7 @@ export default function MobileApp({
       const finalSeverity = reviewSeverity || "Medium";
       const finalDescription = reviewDescription || "";
       const finalCitizenNotes = reviewCitizenNotes || "";
+      const isManual = analysisBypassedRef.current;
 
       // Match user's requested firestore structure:
       // aiCategory, userCategory, severity, description, citizenNotes, department, priorityScore, confidence, imageUrl, latitude, longitude, status
@@ -522,14 +524,14 @@ export default function MobileApp({
       const issueDoc: Issue = {
         issueId: newIssueId,
         category: finalCategory, // Compatibility field
-        aiCategory: analysisResult?.category || "Other",
+        aiCategory: isManual ? "Manual" : (analysisResult?.category || "Other"),
         userCategory: finalCategory,
         severity: finalSeverity,
         description: finalDescription,
         citizenNotes: finalCitizenNotes,
         department: getDepartmentForCategory(finalCategory),
-        priorityScore: analysisResult?.priorityScore || 50,
-        confidence: analysisResult?.confidence || 75,
+        priorityScore: isManual ? 35 : (analysisResult?.priorityScore || 50),
+        confidence: isManual ? 50 : (analysisResult?.confidence || 75),
         imageUrl: selectedImage,
         latitude: coords.lat,
         longitude: coords.lng,
@@ -537,13 +539,14 @@ export default function MobileApp({
         confirmations: 0,
         createdBy: currentUserId || "anonymous",
         createdAt: new Date().toISOString(),
-        suggestedAction: analysisResult?.suggestedAction || "Review by town inspection crew.",
-        estimatedImpact: analysisResult?.estimatedImpact || "Moderate local traffic or hazard risk.",
-        recommendedResolutionTime: analysisResult?.recommendedResolutionTime || "7 Days",
+        suggestedAction: isManual ? "Review by town inspection crew." : (analysisResult?.suggestedAction || "Review by town inspection crew."),
+        estimatedImpact: isManual ? "Moderate local traffic or hazard risk." : (analysisResult?.estimatedImpact || "Moderate local traffic or hazard risk."),
+        recommendedResolutionTime: isManual ? "14 Days" : (analysisResult?.recommendedResolutionTime || "7 Days"),
         votedBy: []
       };
 
       await setDoc(doc(db, "issues", newIssueId), issueDoc);
+      setSubmittedIssue(issueDoc);
       setReportingStep("result");
     } catch (error: any) {
       console.error("Failed to submit report:", error);
@@ -601,6 +604,7 @@ export default function MobileApp({
     setSelectedImage(null);
     setReportingStep("capture");
     setAnalysisResult(null);
+    setSubmittedIssue(null);
     setReviewCategory("");
     setReviewSeverity("Medium");
     setReviewDescription("");
@@ -857,7 +861,7 @@ export default function MobileApp({
                         <Plus className="w-5 h-5 text-white/75 group-hover:translate-x-0.5 transition-transform" />
                       </div>
                       <h3 className="text-base font-bold mt-4">Report Issue</h3>
-                      <p className="text-xs text-white/80 mt-1">Snap a photo and let CivicEye's Gemini analyze gravity, category & routing instantly.</p>
+                      <p className="text-xs text-white/80 mt-1">Snap a photo and let CivicEye's AI analyze severity, category & routing instantly.</p>
                     </button>
 
                     <button
@@ -1073,7 +1077,7 @@ export default function MobileApp({
                         className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-sm rounded-xl transition-all shadow-lg shadow-emerald-500/10 cursor-pointer flex justify-center items-center gap-1.5"
                       >
                         <Sparkles className="w-4 h-4" />
-                        <span>Run Gemini AI Analysis & Submit</span>
+                        <span>Run AI Analysis & Submit</span>
                       </button>
                     </div>
                   )}
@@ -1090,7 +1094,7 @@ export default function MobileApp({
                             </div>
                           </div>
                           <div>
-                            <h4 className="text-sm font-bold text-slate-800">Consulting Gemini Vision</h4>
+                            <h4 className="text-sm font-bold text-slate-800">Consulting AI Inspector</h4>
                             <p className="text-[10px] text-slate-400 mt-1 max-w-[250px] mx-auto">
                               Analyzing structural hazard, computing priority score based on safety threat indicators, and mapping issue.
                             </p>
@@ -1160,7 +1164,7 @@ export default function MobileApp({
                           <div className="mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-900 text-[10px] leading-relaxed flex flex-col gap-1">
                             <div className="flex items-start gap-1.5">
                               <AlertTriangle className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
-                              <span><strong>Gemini Cloud API is at temporary free-tier capacity.</strong> Automatically activated high-fidelity local image inspection heuristics. Successfully pre-classified issue category, severity, and department!</span>
+                              <span><strong>AI Cloud API is at temporary capacity or offline.</strong> Automatically activated high-fidelity local image inspection heuristics. Successfully pre-classified issue category, severity, and department!</span>
                             </div>
                             {analysisResult?._fallbackReason && (
                               <div className="mt-1 p-1.5 bg-white/60 rounded border border-indigo-100 text-[9px] font-mono text-indigo-800 break-all select-text">
@@ -1376,36 +1380,50 @@ export default function MobileApp({
                           </button>
                         </div>
                       ) : (
-                        <div className="space-y-4">
+                        <div className="space-y-4 animate-fadeIn">
                           <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-start gap-2.5">
                             <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                             <div>
                               <h4 className="text-xs font-bold text-emerald-800">Report Successfully Filed</h4>
-                              <p className="text-[10px] text-emerald-600 mt-0.5">Gemini Vision finished analysis and has prioritized this dispatch.</p>
+                              <p className="text-[10px] text-emerald-600 mt-0.5">
+                                {submittedIssue?.aiCategory === "Manual" 
+                                  ? "Your report has been successfully logged manually and routed to the correct dispatch team."
+                                  : "AI Vision finished analysis and has prioritized this dispatch."
+                                }
+                              </p>
                             </div>
                           </div>
 
-                          {/* AI Breakdown Card */}
+                          {/* AI/Manual Breakdown Card */}
                           <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
                             <div className="flex justify-between items-start border-b border-slate-100 pb-2.5">
                               <div>
-                                <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest block mb-0.5">GEMINI VISION</span>
-                                <h4 className="text-sm font-extrabold text-slate-900">{analysisResult?.category || "Other"}</h4>
+                                <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest block mb-0.5">
+                                  {submittedIssue?.aiCategory === "Manual" ? "MANUAL OVERRIDE DISPATCH" : "AI VISION CLASSIFICATION"}
+                                </span>
+                                <h4 className="text-sm font-extrabold text-slate-900">{submittedIssue?.category || "Other"}</h4>
                               </div>
-                              <span className={`text-[10px] font-extrabold px-2 py-0.5 border rounded-full ${getSeverityBadgeColor(analysisResult?.severity || "Medium")}`}>
-                                {analysisResult?.severity || "Medium"}
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 border rounded-full ${getSeverityBadgeColor(submittedIssue?.severity || "Medium")}`}>
+                                {submittedIssue?.severity || "Medium"}
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-3">
+                            <div className="grid grid-cols-3 gap-1.5 border-b border-slate-100 pb-3 text-center">
                               <div>
                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Priority Score</p>
-                                <p className="text-base font-extrabold text-red-600">{analysisResult?.priorityScore || 50}/100</p>
+                                <p className="text-base font-extrabold text-red-600">{submittedIssue?.priorityScore || 50}/100</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase">Department</p>
+                                <p className="text-xs font-extrabold text-indigo-700 truncate">{submittedIssue?.department || "Sanitation"}</p>
                               </div>
                               <div>
                                 <p className="text-[9px] font-bold text-slate-400 uppercase">AI Confidence</p>
                                 <p className="text-base font-extrabold text-indigo-600">
-                                  {analysisResult?.confidence ? `${Math.round(analysisResult.confidence)}%` : "N/A"}
+                                  {submittedIssue?.aiCategory === "Manual" 
+                                    ? "Manual" 
+                                    : (submittedIssue?.confidence ? `${Math.round(submittedIssue.confidence)}%` : "N/A")
+                                  }
                                 </p>
                               </div>
                             </div>
@@ -1413,15 +1431,21 @@ export default function MobileApp({
                             <div className="space-y-2 text-xs">
                               <div>
                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Description</p>
-                                <p className="text-slate-700 leading-snug mt-0.5">{analysisResult?.description}</p>
+                                <p className="text-slate-700 leading-snug mt-0.5">{submittedIssue?.description || "No description provided."}</p>
                               </div>
+                              {submittedIssue?.citizenNotes && (
+                                <div>
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase">Citizen Notes</p>
+                                  <p className="text-slate-700 leading-snug mt-0.5 font-medium italic">"{submittedIssue.citizenNotes}"</p>
+                                </div>
+                              )}
                               <div>
                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Suggested Correction Action</p>
-                                <p className="text-slate-700 leading-snug mt-0.5">{analysisResult?.suggestedAction}</p>
+                                <p className="text-slate-700 leading-snug mt-0.5">{submittedIssue?.suggestedAction}</p>
                               </div>
                               <div>
                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Estimated Impact</p>
-                                <p className="text-slate-700 leading-snug mt-0.5">{analysisResult?.estimatedImpact || "Moderate local disruption."}</p>
+                                <p className="text-slate-700 leading-snug mt-0.5">{submittedIssue?.estimatedImpact || "Moderate local disruption."}</p>
                               </div>
                             </div>
                           </div>

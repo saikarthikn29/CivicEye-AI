@@ -210,13 +210,13 @@ export default function App() {
                   <div className="space-y-2">
                     <h3 className="text-xl font-bold text-white">Citizen Portal</h3>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      Simulate the citizen mobile app. Capture photos, automatically identify issues via Gemini Vision AI, and place geotagged incidents on OpenStreetMap.
+                      Simulate the citizen mobile app. Capture photos, automatically identify issues via high-fidelity AI Analysis, and place geotagged incidents on OpenStreetMap.
                     </p>
                   </div>
                   <ul className="space-y-3 text-xs text-slate-300 border-t border-slate-800 pt-5">
                     <li className="flex items-center gap-2.5">
                       <span className="text-emerald-500 font-bold">📸</span>
-                      <span>Snap photos & receive Gemini analyses</span>
+                      <span>Snap photos & receive AI analyses</span>
                     </li>
                     <li className="flex items-center gap-2.5">
                       <span className="text-emerald-500 font-bold">📍</span>
@@ -252,7 +252,7 @@ export default function App() {
             </div>
 
             <div className="mt-12 text-[10px] text-slate-500 font-medium tracking-wide">
-              Powered by Google Gemini 2.5 Flash • Firebase Firestore & Auth • OpenStreetMap
+              Powered by NVIDIA NIM AI • Firebase Firestore & Auth • OpenStreetMap
             </div>
           </div>
         ) : viewMode === "authority_login" ? (
