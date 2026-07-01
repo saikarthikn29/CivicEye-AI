@@ -96,7 +96,7 @@ function findNvidiaApiKey(): string | undefined {
 }
 
 async function analyzeWithNvidiaNim(cleanBase64: string, mimeType: string, apiKey: string) {
-  const modelName = "meta/llama-3.2-11b-vision-instruct";
+  const modelName = "meta/llama-3.2-90b-vision-instruct";
   console.log(`[CIVICEYE] Invoking NVIDIA NIM API using model: ${modelName}...`);
   
   const prompt = `You are an expert urban infrastructure inspection AI.
@@ -360,6 +360,7 @@ app.post("/api/gemini-analyze", async (req, res) => {
 
     // 1. Try NVIDIA NIM first if configured
     const nvidiaApiKey = findNvidiaApiKey();
+    let nvidiaError: any = null;
     if (nvidiaApiKey) {
       try {
         const { rawText, parsed: data } = await analyzeWithNvidiaNim(cleanBase64, mimeType, nvidiaApiKey);
@@ -397,6 +398,7 @@ app.post("/api/gemini-analyze", async (req, res) => {
         return res.json(data);
       } catch (nvidiaErr: any) {
         console.warn("[CIVICEYE SERVER] NVIDIA NIM API attempt failed. Falling back to Gemini pipeline...", nvidiaErr.message || nvidiaErr);
+        nvidiaError = nvidiaErr;
       }
     }
 
@@ -410,6 +412,9 @@ app.post("/api/gemini-analyze", async (req, res) => {
       : (isValidGeminiKey(primaryKey) ? primaryKey : (isValidGeminiKey(fallbackKey) ? fallbackKey : undefined));
     
     if (!activeKey) {
+      if (nvidiaError) {
+        throw new Error(`NVIDIA NIM API failed: ${nvidiaError.message || String(nvidiaError)}`);
+      }
       // Collect specific detailed reasons for fallback reporting
       const primaryVal = getGeminiKeyValidation(primaryKey);
       const primaryValAi = getGeminiKeyValidation(primaryKeyAi);
