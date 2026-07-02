@@ -50,6 +50,116 @@ function isValidGeminiKey(key: string | undefined): boolean {
   return getGeminiKeyValidation(key).isValid;
 }
 
+function extractAndParseJSON(text: string): any {
+  let cleanText = text.trim();
+  
+  // 1. Try to locate the main JSON block using { and }
+  const firstBrace = cleanText.indexOf('{');
+  const lastBrace = cleanText.lastIndexOf('}');
+  
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleanText = cleanText.substring(firstBrace, lastBrace + 1);
+  } else {
+    // If we can't find { and }, check if it's wrapped in backticks or just conversational
+    if (cleanText.includes("```")) {
+      // Try to remove markdown code wraps
+      cleanText = cleanText.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const fb = cleanText.indexOf('{');
+      const lb = cleanText.lastIndexOf('}');
+      if (fb !== -1 && lb !== -1 && lb > fb) {
+        cleanText = cleanText.substring(fb, lb + 1);
+      }
+    }
+  }
+
+  // 2. Try parsing directly
+  try {
+    return JSON.parse(cleanText);
+  } catch (e) {
+    // Attempt cleaning trailing commas and potential comments or weird control characters
+    try {
+      let cleaned = cleanText
+        // Remove trailing commas before closing braces/brackets
+        .replace(/,(\s*[\]}])/g, '$1')
+        // Remove single-line JS comments if any
+        .replace(/\/\/.*/g, '')
+        // Remove multi-line JS comments
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+      return JSON.parse(cleaned);
+    } catch (e2) {
+      console.warn("[JSON Extraction] Standard parsing failed, attempting fuzzy/regex reconstruction.", e2);
+    }
+  }
+
+  // 3. Regex-based key-value extraction fallback if JSON parsing completely failed.
+  const result: any = {
+    category: "Other",
+    severity: "Medium",
+    confidence: 70,
+    department: "Sanitation",
+    priorityScore: 50,
+    description: "",
+    suggestedAction: "Civic inspectors should verify and schedule maintenance.",
+    estimatedImpact: "Moderate impact on local community/safety.",
+    isInvalidImage: false
+  };
+
+  const findValueForField = (field: string, isBoolean = false, isNumber = false): any => {
+    const regex = new RegExp(`(?:["'*\\s-]*${field}["'*\\s-]*[:=]\\s*)([^\\n,}"]+)`, "i");
+    const match = text.match(regex);
+    if (match && match[1]) {
+      let val = match[1].trim().replace(/^["']|["']$/g, "").trim();
+      if (isBoolean) {
+        return val.toLowerCase() === "true";
+      }
+      if (isNumber) {
+        const num = parseInt(val.replace(/[^\d]/g, ""), 10);
+        return isNaN(num) ? undefined : num;
+      }
+      return val;
+    }
+    return undefined;
+  };
+
+  const catVal = findValueForField("category");
+  if (catVal) result.category = catVal;
+
+  const sevVal = findValueForField("severity");
+  if (sevVal) result.severity = sevVal;
+
+  const confVal = findValueForField("confidence", false, true);
+  if (confVal !== undefined) result.confidence = confVal;
+
+  const deptVal = findValueForField("department");
+  if (deptVal) result.department = deptVal;
+
+  const priVal = findValueForField("priorityScore", false, true);
+  if (priVal !== undefined) result.priorityScore = priVal;
+
+  const descVal = findValueForField("description");
+  if (descVal) result.description = descVal;
+
+  const actionVal = findValueForField("suggestedAction");
+  if (actionVal) result.suggestedAction = actionVal;
+
+  const impactVal = findValueForField("estimatedImpact");
+  if (impactVal) result.estimatedImpact = impactVal;
+
+  const invalidVal = findValueForField("isInvalidImage", true);
+  if (invalidVal !== undefined) result.isInvalidImage = invalidVal;
+
+  if (!result.description) {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('*') && !l.startsWith('#') && !l.startsWith('{'));
+    if (lines.length > 0) {
+      result.description = lines.slice(0, 2).join(' ');
+    } else {
+      result.description = "No description could be extracted from AI response.";
+    }
+  }
+
+  return result;
+}
+
 function getNvidiaKeyValidation(key: string | undefined): { isValid: boolean; reason?: string } {
   if (!key) {
     return { isValid: false, reason: "No key configured." };
@@ -173,16 +283,8 @@ Do not include any Markdown wrap like \`\`\`json. Just the clean JSON string.`;
     throw new Error("Empty response returned from NVIDIA NIM API.");
   }
   
-  // Extract and parse JSON
-  let cleanText = choiceText.trim();
-  const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    cleanText = jsonMatch[0];
-  } else if (cleanText.includes("```")) {
-    cleanText = cleanText.replace(/```json/g, "").replace(/```/g, "").trim();
-  }
-  
-  const parsed = JSON.parse(cleanText);
+  // Extract and parse JSON robustly
+  const parsed = extractAndParseJSON(choiceText);
   return {
     rawText: choiceText,
     parsed
@@ -397,8 +499,8 @@ app.post("/api/gemini-analyze", async (req, res) => {
         console.log("[CIVICEYE SERVER] Successfully processed analysis using NVIDIA NIM API.");
         return res.json(data);
       } catch (nvidiaErr: any) {
-        console.warn("[CIVICEYE SERVER] NVIDIA NIM API attempt failed. Falling back to Gemini pipeline...", nvidiaErr.message || nvidiaErr);
-        nvidiaError = nvidiaErr;
+        console.warn("[CIVICEYE SERVER] NVIDIA NIM API attempt failed. Throwing NVIDIA error immediately to prevent misleading Gemini key validation warnings.", nvidiaErr.message || nvidiaErr);
+        throw new Error(`NVIDIA NIM API failed: ${nvidiaErr.message || String(nvidiaErr)}`);
       }
     }
 
@@ -537,13 +639,7 @@ Do not include any Markdown wrap like \`\`\`json. Just the clean JSON string.`;
     }
 
     let text = response.text || "{}";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      text = jsonMatch[0];
-    } else if (text.includes("```")) {
-      text = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    }
-    const data = JSON.parse(text);
+    const data = extractAndParseJSON(text);
     data._rawText = response.text || "{}";
 
     if (data && !data.isInvalidImage) {
